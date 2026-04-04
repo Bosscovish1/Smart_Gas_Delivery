@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vendor Dashboard - Smart Gas</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .card { background: var(--surface); padding: 1.5rem; border-radius: var(--radius); border: 1px solid var(--border-color); margin-bottom: 1.5rem; }
+        .product-item { display: flex; justify-content: space-between; align-items: center; padding: 1rem; border-bottom: 1px solid var(--border-color); }
+        .product-item:last-child { border-bottom: none; }
+        .order-item { border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <a href="index.html" class="navbar-brand">🔥 SmartGas Vendor</a>
+        <div class="navbar-nav" id="navbar-links"></div>
+    </nav>
+
+    <div class="container dashboard-grid" style="grid-template-columns: 1fr 1fr;">
+        <!-- Left Column: Manage Products -->
+        <div>
+            <div class="glass-card card">
+                <h3>Add New Gas Bottle</h3>
+                <form id="addProductForm">
+                    <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div>
+                            <label>Brand (e.g. Camgaz, SCTM)</label>
+                            <input type="text" id="gas_brand" class="form-control" required>
+                        </div>
+                        <div>
+                            <label>Bottle Size (e.g. 12.5kg)</label>
+                            <input type="text" id="bottle_size" class="form-control" required>
+                        </div>
+                    </div>
+                    <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div>
+                            <label>Price (XAF)</label>
+                            <input type="number" id="price" class="form-control" required>
+                        </div>
+                        <div>
+                            <label>Stock Quantity</label>
+                            <input type="number" id="stock_quantity" class="form-control" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Add Product</button>
+                </form>
+            </div>
+
+            <div class="glass-card card">
+                <h3>My Inventory</h3>
+                <div id="inventoryList">Loading inventory...</div>
+            </div>
+        </div>
+
+        <!-- Right Column: Incoming Orders -->
+        <div>
+            <div class="glass-card card">
+                <h3>Incoming Orders</h3>
+                <div id="ordersList">Loading orders...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script>
+        const user = checkAuth('vendor');
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadInventory();
+            loadOrders();
+        });
+
+        async function loadInventory() {
+            try {
+                const products = await apiCall(`/products/vendor/${user.id}`);
+                const list = document.getElementById('inventoryList');
+                if (products.length === 0) {
+                    list.innerHTML = '<p>No products in inventory.</p>';
+                    return;
+                }
+
+                list.innerHTML = products.map(p => `
+                    <div class="product-item">
+                        <div>
+                            <strong>${p.gas_brand}</strong> (${p.bottle_size})
+                            <br><span style="color: var(--secondary-color); font-weight: 500;">${p.price} XAF</span>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <span style="font-size: 0.9rem;">Stock: ${p.stock_quantity}</span>
+                            <button class="btn btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;" onclick="updateStockPrompt(${p.id}, ${p.price}, ${p.stock_quantity})">Edit</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function updateStockPrompt(id, price, stock) {
+            const newPrice = prompt("Update price (XAF):", price);
+            if (newPrice === null) return;
+            const newStock = prompt("Update stock quantity:", stock);
+            if (newStock === null) return;
+
+            try {
+                await apiCall(`/products/${id}`, 'PUT', { price: parseInt(newPrice), stock_quantity: parseInt(newStock) });
+                loadInventory();
+            } catch (err) {
+                alert('Update failed');
+            }
+        }
+
+        document.getElementById('addProductForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                gas_brand: document.getElementById('gas_brand').value,
+                bottle_size: document.getElementById('bottle_size').value,
+                price: parseFloat(document.getElementById('price').value),
+                stock_quantity: parseInt(document.getElementById('stock_quantity').value)
+            };
+
+            try {
+                await apiCall('/products', 'POST', payload);
+                alert('Product added');
+                e.target.reset();
+                loadInventory();
+            } catch (err) {
+                alert('Failed to add product: ' + err.message);
+            }
+        });
+
+        async function loadOrders() {
+            try {
+                const orders = await apiCall('/orders');
+                const list = document.getElementById('ordersList');
+                if (orders.length === 0) {
+                    list.innerHTML = '<p>No orders yet.</p>';
+                    return;
+                }
+
+                list.innerHTML = orders.map(o => `
+                    <div class="order-item">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <strong>Order #${o.id}</strong>
+                            <span style="padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem; background: ${o.status === 'pending' ? '#fef08a' : o.status === 'delivered' ? '#bbf7d0' : '#bfdbfe'}">${o.status.toUpperCase()}</span>
+                        </div>
+                        <p style="font-size: 0.9rem;"><strong>Customer:</strong> ${o.customer_name} (${o.customer_phone})</p>
+                        <p style="font-size: 0.9rem;"><strong>Address:</strong> ${o.customer_address || 'Not provided'}</p>
+                        <p style="font-size: 0.9rem; margin-top: 0.5rem;"><strong>Order:</strong> ${o.quantity}x ${o.gas_brand} (${o.bottle_size}) = <strong>${o.total_price} XAF</strong></p>
+                        
+                        <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                            ${o.status === 'pending' ? `
+                                <button class="btn btn-primary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="updateOrderStatus(${o.id}, 'accepted')">Accept</button>
+                            ` : ''}
+                            ${o.status === 'accepted' ? `
+                                <button class="btn btn-primary" style="background:#10b981; padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="updateOrderStatus(${o.id}, 'delivered')">Mark Delivered</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function updateOrderStatus(id, status) {
+            try {
+                await apiCall(`/orders/${id}/status`, 'PUT', { status });
+                loadOrders();
+            } catch (err) {
+                alert('Failed to update order status');
+            }
+        }
+    </script>
+</body>
+</html>

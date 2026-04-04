@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customer Dashboard - Smart Gas</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        #map {
+            height: 100%;
+            width: 100%;
+            min-height: 400px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+        }
+        .vendor-card, .product-card, .order-card {
+            background: var(--surface);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            border: 1px solid var(--border-color);
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <a href="index.html" class="navbar-brand">🔥 SmartGas Customer</a>
+        <div class="navbar-nav" id="navbar-links"></div>
+    </nav>
+
+    <div class="container dashboard-grid">
+        <!-- Sidebar: Vendors and Products -->
+        <div>
+            <div class="glass-card" style="margin-bottom: 2rem; padding: 1.5rem;">
+                <h3>My Orders</h3>
+                <div id="ordersList">Loading orders...</div>
+            </div>
+
+            <div class="glass-card" style="padding: 1.5rem;">
+                <h3 id="panelTitle">Nearby Vendors</h3>
+                <div id="vendorsList">Locating nearby vendors...</div>
+                
+                <div id="productsPanel" style="display: none;">
+                    <button class="btn btn-secondary" onclick="showVendors()" style="margin-bottom: 1rem; padding: 0.5rem 1rem;">&larr; Back</button>
+                    <h3>Available Gas</h3>
+                    <div id="productsList">Loading products...</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Map Area -->
+        <div>
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <!-- Checkout Modal -->
+    <div id="checkoutModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center; backdrop-filter: blur(4px);">
+        <div style="background:var(--surface); padding:2rem; border-radius:12px; width:90%; max-width:400px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
+            <h3 style="margin-top:0;">Complete Your Order</h3>
+            <p id="checkoutDetails" style="font-size: 1.1rem; margin-bottom: 1.5rem; color: var(--primary-dark); font-weight: 500;">Total: XAF</p>
+            
+            <div style="margin-bottom: 1.5rem;">
+                <label style="font-weight: 500; font-size: 0.9rem;">Select Payment Method</label>
+                <select id="paymentMethod" class="form-control" style="margin-top: 0.5rem; border: 2px solid var(--border-color);">
+                    <option value="cash">💵 Pay on Delivery (Cash)</option>
+                    <option value="mobile_money">📱 Mobile Money (MTN / Orange)</option>
+                </select>
+            </div>
+            
+            <div id="momoDetails" style="display:none; margin-bottom: 1.5rem; padding: 1rem; background: rgba(14, 165, 233, 0.1); border-radius: 8px;">
+                <p id="momoInstructions" style="font-size: 0.9rem; margin-bottom: 0.8rem;"></p>
+                <label style="font-size: 0.85rem;">Your Mobile Money Number (to confirm payment)</label>
+                <input type="text" class="form-control" placeholder="6XXXXXXXX" style="margin-top: 0.5rem;">
+            </div>
+
+            <div style="display:flex; gap:1rem;">
+                <button class="btn btn-secondary w-100" onclick="closeCheckout()">Cancel</button>
+                <button class="btn btn-primary w-100" id="confirmCheckoutBtn" onclick="confirmCheckout()">Confirm Order</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDuWo4YCC_RxGzy4fTcL_NNXDTnsRT1smU&callback=initMap"></script>
+    <script>
+        const user = checkAuth('customer');
+        let map, userMarker, vendorsData = [];
+        let currentVendorId = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+             loadMyOrders();
+        });
+
+        function initMap() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const { latitude, longitude } = position.coords;
+                        setupMap(latitude, longitude);
+                        fetchVendors(latitude, longitude);
+                    },
+                    (error) => {
+                        alert("Please enable location to see nearby vendors. Using default Yaounde location.");
+                        setupMap(3.8480, 11.5021);
+                        fetchVendors(3.8480, 11.5021);
+                    },
+                    { timeout: 4000 }
+                );
+            }
+        }
+
+        function setupMap(lat, lng) {
+            map = new google.maps.Map(document.getElementById("map"), {
+                center: { lat, lng },
+                zoom: 13,
+                styles: [
+                    { "featureType": "all", "elementType": "geometry.fill", "stylers": [{"weight": "2.00"}] }
+                ]
+            });
+
+            new google.maps.Marker({
+                position: { lat, lng },
+                map: map,
+                title: "You are here",
+                icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+            });
+        }
+
+        async function fetchVendors(lat, lng) {
+            try {
+                const vendors = await apiCall(`/vendors/nearby?lat=${lat}&lng=${lng}&radius=20`);
+                vendorsData = vendors;
+                const list = document.getElementById('vendorsList');
+                list.innerHTML = '';
+
+                if (vendors.length === 0) list.innerHTML = '<p>No vendors found nearby.</p>';
+
+                vendors.forEach(v => {
+                    // Add Map Marker
+                    const marker = new google.maps.Marker({
+                        position: { lat: parseFloat(v.lat), lng: parseFloat(v.lng) },
+                        map: map,
+                        title: v.name
+                    });
+
+                    marker.addListener('click', () => {
+                        viewVendor(v.id, v.name, v.phone);
+                    });
+
+                    // Add to UI List
+                    list.innerHTML += `
+                        <div class="vendor-card">
+                            <h4 style="color: var(--primary-dark);">${v.name}</h4>
+                            <p style="font-size: 0.85rem; color: var(--text-secondary);">${v.address || 'No address'}</p>
+                            <p style="font-size: 0.85rem; margin-bottom: 0.5rem;">Distance: ${parseFloat(v.distance).toFixed(2)} km</p>
+                            <button class="btn btn-primary" style="padding: 0.5rem; font-size: 0.85rem;" onclick="viewVendor(${v.id}, '${v.name}', '${v.phone}')">View Gas</button>
+                        </div>
+                    `;
+                });
+            } catch (err) {
+                alert('Failed to fetch nearby vendors');
+            }
+        }
+
+        async function loadMyOrders() {
+            try {
+                const orders = await apiCall('/orders');
+                const list = document.getElementById('ordersList');
+                if (orders.length === 0) {
+                    list.innerHTML = '<p style="color: var(--text-secondary);">No orders yet.</p>';
+                    return;
+                }
+
+                list.innerHTML = orders.map(o => `
+                    <div class="order-card">
+                        <p><strong>${o.gas_brand} (${o.bottle_size})</strong></p>
+                        <p style="font-size: 0.85rem;">Vendor: ${o.vendor_name}</p>
+                        <p style="font-size: 0.85rem;">Qty: ${o.quantity} | Total: ${o.total_price} XAF</p>
+                        <span style="font-size: 0.8rem; padding: 0.25rem 0.5rem; background: ${o.status === 'pending' ? '#fef08a' : o.status === 'delivered' ? '#bbf7d0' : '#bfdbfe'}; border-radius: 4px; display: inline-block; margin-top: 0.5rem;">
+                            Status: ${o.status.toUpperCase()}
+                        </span>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        let currentVendorPhone = null;
+
+        async function viewVendor(vendorId, title, phone) {
+            currentVendorId = vendorId;
+            currentVendorPhone = phone;
+            document.getElementById('vendorsList').style.display = 'none';
+            document.getElementById('panelTitle').style.display = 'none';
+            document.getElementById('productsPanel').style.display = 'block';
+
+            try {
+                const products = await apiCall(`/products/vendor/${vendorId}`);
+                const list = document.getElementById('productsList');
+                list.innerHTML = '';
+                
+                if (products.length === 0) {
+                    list.innerHTML = '<p>This vendor has no gas available currently.</p>';
+                }
+
+                products.forEach(p => {
+                    list.innerHTML += `
+                        <div class="product-card">
+                            <h4>${p.gas_brand} - ${p.bottle_size}</h4>
+                            <p style="color: var(--secondary-color); font-weight: bold;">${p.price} XAF</p>
+                            <p style="font-size: 0.85rem; margin-bottom: 0.5rem;">In stock: ${p.stock_quantity > 0 ? p.stock_quantity : '<span style="color:red">Out of stock</span>'}</p>
+                            <button class="btn btn-primary w-100" style="padding: 0.5rem; font-size: 0.9rem;" 
+                                ${p.stock_quantity <= 0 ? 'disabled' : ''} 
+                                onclick="placeOrder(${vendorId}, ${p.id}, ${p.price})">
+                                Buy Now
+                            </button>
+                        </div>
+                    `;
+                });
+            } catch (err) {
+                alert('Failed to load vendor products');
+            }
+        }
+
+        function showVendors() {
+            document.getElementById('vendorsList').style.display = 'block';
+            document.getElementById('panelTitle').style.display = 'block';
+            document.getElementById('productsPanel').style.display = 'none';
+        }
+
+        let checkoutCache = null;
+
+        function placeOrder(vendorId, productId, price) {
+            checkoutCache = { vendorId, productId, price, phone: currentVendorPhone };
+            document.getElementById('checkoutDetails').innerHTML = `Pay exactly: <strong style="color:red; font-size:1.2rem;">${price} XAF</strong>`;
+            
+            document.getElementById('momoInstructions').innerHTML = checkoutCache.phone ? 
+                `<strong>Action Required:</strong> Please manually type *126# or #150# on your phone and send <strong>${price} XAF</strong> to the vendor's number: <strong style="font-size:1.1rem; color: var(--primary-dark);">${checkoutCache.phone}</strong>` 
+                : 'Vendor phone number unavailable.';
+                
+            document.getElementById('checkoutModal').style.display = 'flex';
+        }
+
+        function closeCheckout() {
+            document.getElementById('checkoutModal').style.display = 'none';
+        }
+
+        document.getElementById('paymentMethod').addEventListener('change', (e) => {
+            document.getElementById('momoDetails').style.display = e.target.value === 'mobile_money' ? 'block' : 'none';
+        });
+
+        async function confirmCheckout() {
+            if (!checkoutCache) return;
+            const btn = document.getElementById('confirmCheckoutBtn');
+            const method = document.getElementById('paymentMethod').value;
+            
+            try {
+                btn.disabled = true;
+                btn.textContent = 'Processing...';
+
+                if (method === 'mobile_money') {
+                    // Simulate a tiny delay for momo "connection"
+                    await new Promise(r => setTimeout(r, 1500));
+                }
+
+                await apiCall('/orders', 'POST', {
+                    vendor_id: checkoutCache.vendorId,
+                    product_id: checkoutCache.productId,
+                    quantity: 1,
+                    total_price: checkoutCache.price,
+                    payment_method: method
+                });
+                
+                alert('Order placed successfully! ' + (method === 'mobile_money' ? 'Payment prompt sent to your phone.' : 'Pay cash to the vendor.'));
+                closeCheckout();
+                loadMyOrders();
+                showVendors();
+            } catch (err) {
+                alert('Failed to place order: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Confirm Order';
+                checkoutCache = null;
+            }
+        }
+    </script>
+</body>
+</html>
