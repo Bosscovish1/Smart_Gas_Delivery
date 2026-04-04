@@ -1,4 +1,5 @@
-const API_URL = 'http://localhost:5000/api';
+const API_URL = 'https://smart-gas-delivery.onrender.com/api';
+// const API_URL = 'http://localhost:5000/api';
 
 // Authentication Helpers
 function setAuth(token, user) {
@@ -47,9 +48,9 @@ function updateNavbar() {
     if (!nav) return;
 
     if (user) {
-        let dashboardLink = user.role === 'admin' ? 'admin-dashboard.html' : 
-                            user.role === 'customer' ? 'customer-dashboard.html' : 
-                            'vendor-dashboard.html';
+        let dashboardLink = user.role === 'admin' ? 'admin-dashboard.html' :
+            user.role === 'customer' ? 'customer-dashboard.html' :
+                'vendor-dashboard.html';
         nav.innerHTML = `
             <a href="${dashboardLink}">Dashboard</a>
             <a href="#" onclick="logout(); return false;">Logout (${user.name})</a>
